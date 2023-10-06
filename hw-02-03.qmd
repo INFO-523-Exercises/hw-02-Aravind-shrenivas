@@ -1,0 +1,207 @@
+---
+title: "Correlating Like a Data Master"
+author: "Aravind shrenivas Murali"
+format: html
+editor: visual
+toc: true
+---
+
+## Loading necessary packages
+
+```{r}
+if (!require(pacman))
+  install.packages("pacman")
+
+pacman::p_load(colorblindr,
+       dlookr,
+       formattable,
+       GGally,
+       ggdist,
+       ggpubr,
+       ggridges,
+       here,
+       tidyverse)
+
+# Set global ggplot() theme
+# Theme pub_clean() from the ggpubr package with base text size = 16
+theme_set(theme_pubclean(base_size = 12)) 
+# All axes titles to their respective far right sides
+theme_update(axis.title = element_text(hjust = 1))
+# Remove axes ticks
+theme_update(axis.ticks = element_blank()) 
+# Remove legend key
+theme_update(legend.key = element_blank())
+
+if (!require(hexbin))  
+  install.packages("hexbin")
+library(hexbin)
+```
+
+## **Load and Examine a Data Set**
+
+```{r}
+dataset  <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-02-14/age_gaps.csv')
+
+# What does the data look like?
+dataset |>
+  head() |>
+  formattable()
+```
+
+## **Describe and Visualize Correlations**
+
+```{r}
+# Table of correlations between numerical variables (we are sticking to the default Pearson's r coefficient)
+correlate(dataset) |>
+  formattable()
+```
+
+Correlations denote a statistical connection between two numerical variables. Finding correlations in data helps assess crucial assumptions in parametric statistics. This assumption implies if the variables are collected randomly.
+
+```{r}
+# Correlation matrix of numerical variables
+dataset |>
+plot_correlate()
+```
+
+## **Visualize Correlations within Groups**
+
+```{r}
+dataset |>
+  group_by(character_1_gender) |>
+  plot_correlate()
+```
+
+If the correlation coefficient is close to +1, it suggests a strong positive linear relationship. If the correlation coefficient is close to -1, it implies a strong negative linear relationship. In both cases, a high correlation coefficient signifies a more predictable and consistent association between the variables.
+
+```{r}
+dataset |> 
+  dplyr::select(character_1_gender, actor_1_age) |>
+  ggpairs(aes(color = character_1_gender, alpha = 0.5)) +
+  theme(strip.background = element_blank()) +
+  scale_fill_OkabeIto() +
+  scale_color_OkabeIto()
+```
+
+In the above plot it shows the correlation between actors gender and age. We can see that there is a strong correlation by the overlapping of the graph.
+
+## **Describe and Visualize Relationships Based on Target Variables**
+
+### **Target Variables**
+
+`Target variables` are essentially numerical or categorical variables that you want to relate others to in a data frame.
+
+### **Numerical Target Variables: Numerical Variable of Interest**
+
+```{r}
+# First, we need to remove NAs, they cause an error
+dataset.noNA <- dataset |> 
+  drop_na()
+
+# The numerical predictor variable that we want
+num <- target_by(dataset.noNA, actor_1_age)
+
+# Relating the variable of interest to the numerical target variable
+num_num <- relate(num, actor_2_age)
+
+# Summary of the regression analysis - the same as the summary from lm(Formula)
+summary(num_num)
+```
+
+We can see that the intercept is 15.791, and for every one-unit increase in **`actor_2_age`**, the response variable increases by 0.822. Both coefficients are highly significant.
+
+```{r}
+# Plotting the linear relationship
+plot(num_num)
+```
+
+This is the graph of actor 1 age and observed age predicted by the model.
+
+### **Numerical Target Variables: Categorical Variable of Interest**
+
+```{r}
+# The categorical predictor variable that we want
+num <- target_by(dataset, actor_1_age) 
+
+# We need to change Group to a factor
+num$character_1_gender <- as.factor(num$character_1_gender)
+
+# Relating the variable of interest to the numerical target variable
+num_cat <- relate(num, character_1_gender)
+
+# Summary of the ANOVA analysis - the same as the summary from anova(lm(Formula))
+summary(num_cat)
+```
+
+```{r}
+plot(num_cat) + 
+  theme(axis.text.x = element_blank())
+```
+
+we can see a more overlap in the box plots of man an woman. This means that the box plot indicates less association with the actor age.
+
+### **Categorical Target Variables: Numerical Variable of Interest**
+
+```{r}
+# The categorical predictor variable that we want
+categ <- target_by(dataset, character_1_gender)
+
+# Relating the variable of interest to the numerical target variable
+cat_num <- relate(categ, actor_1_age)
+
+# Summary of descriptive statistics
+summary(cat_num)
+```
+
+This table provides descriptive statistics for the variable "character_1_gender." It also provides insights into the central tendency, spread, and shape of the distribution of this variable.
+
+```{r}
+plot(cat_num) 
+```
+
+From this plot, we can see that "character_1_gender" has a moderately right-skewed distribution with some variability and potential outliers on the higher end.
+
+### **Categorical Target Variables: Categorical Variable of Interest**
+
+```{r}
+# Create new categorical column
+cat_dataset <- dataset |>
+  select(actor_1_age, character_1_gender) |>
+  drop_na() |>
+  mutate(Highage = ifelse(
+    actor_1_age > (mean(actor_1_age + sd(actor_1_age))), 
+                          "Yes", 
+                          "No"))
+
+# New dataset 
+cat_dataset |>
+  head() |>
+  formattable()
+```
+
+We have created a new categorical variable called high age which denotes higher age in man and woman.
+
+```{r}
+# The categorical predictor variable that we want
+categ <- target_by(cat_dataset, Highage)
+
+# Relating the variable of interest to the categorical target variable
+cat_cat <- relate(categ, character_1_gender)
+
+# Summary of the Chi-square test for Independence
+summary(cat_cat)
+```
+
+The Chi-square test indicates a significant association (p = 0.003) between "Highage" and "character_1_gender" in the dataset, suggesting that the distribution of gender differs based on whether the age is higher than the threshold to identify values that are considered higher or lower than the average.
+
+```{r}
+plot(cat_cat)
+```
+
+We can see that the tiles are disproportional, it indicates an association between "Highage" and "character_1_gender." So, No tile is larger in man and woman which denotes a lower likelihood of man or woman having higher age.
+
+## **Produce an HTML Transformation Summary**
+
+```{r}
+transformation_web_report(dataset)
+```

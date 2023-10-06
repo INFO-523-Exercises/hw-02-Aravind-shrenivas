@@ -1,0 +1,194 @@
+---
+title: "Transforming like a Data Transformer"
+author: "Aravind shrenivas Murali"
+format: html
+editor: visual
+toc: true
+---
+
+## Loading necessary packages
+
+```{r}
+# Sets the number of significant figures to two - e.g., 0.01
+options(digits = 2)
+
+# Required package for quick package downloading and loading 
+if (!require(pacman))  
+  install.packages("pacman")
+
+# Downloads and load required packages
+pacman::p_load(dlookr, # Exploratory data analysis
+               dplyr,
+               forecast, # Needed for Box-Cox transformations
+               formattable, # HTML tables from R outputs
+               DMwR2,
+               here, # Standardizes paths to data
+               kableExtra, # Alternative to formattable
+               knitr, # Needed to write HTML reports
+               missRanger, # To generate NAs
+               tidyverse) # Powerful data wrangling package suite
+```
+
+## Load and examine a dataset
+
+I have chosen the hollywood age gap dataset for the assignment. This dataset basically shows the age of the couple and the age difference between them.
+
+```{r}
+dataset  <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-02-14/age_gaps.csv') |> 
+  mutate(actor_age = ifelse(actor_2_age >= 0 & actor_2_age <= 30, "Young",
+                            ifelse(actor_2_age > 30 & actor_2_age <= 50, "Old", "Very old")),
+         actor_age = fct_rev(actor_age))
+```
+
+I have loaded the dataset using the URL provided in the git repository. I am using the age of the young actor in every couple which is mentioned as actor_2_age in the dataset and performing the operations in it. I am chosing the younger actors because their age seems a bit diverse compared to the older actors where most of them fall under very old category. Further, I am creating another categorical variable called actor_age where it says if the actor is young, old or very old.
+
+```{r}
+dataset |>
+  head() |>
+  formattable()
+```
+
+From the above code we can see the new categorical variable added which classifies if the actor_2 is young, old or very old.
+
+## Describing properties of the data
+
+```{r}
+dataset |>
+  select(age_difference, actor_1_age, actor_2_age) |> 
+  dlookr::describe() |>
+  select(described_variables, skewness) |>
+  formattable()
+```
+
+From the above, we can see that age_difference is moderately positive skewed and the other categorical variables are mildly positive skewed. So, the distribution is skewed to the right.
+
+## Testing normality
+
+```{r}
+dataset |>
+plot_normality(age_difference, actor_1_age, actor_2_age)
+```
+
+I can observe that the graphs origin, log transformation and sqrt transformation all represents a normal bell curve and they are moderately positively skewed. We can see that the qq plots are in a 45 degree angle which means that the observed data closely matches the expected distribution.\\
+
+## Normality within groups
+
+```{r}
+dataset %>%
+  group_by(actor_age) %>%
+  select(actor_1_age, actor_2_age) %>%
+  plot_normality()
+```
+
+The plots of actor 1 age and actor 2 age closely represents a normal bell curve and the qq plot is also in a 45 degree angle. This means that the distribution is as expected.
+
+## Transforming data
+
+```{r}
+InsMod <- dataset |>
+  filter(actor_1_age > 25)
+```
+
+I am filtering the dataset and creating a new dataset called `InsMod` where it contains values of actor 1 age which is greater than 25.
+
+#### Square-root Transformation
+
+```{r}
+sqrtIns <- transform(InsMod$actor_1_age, method = "sqrt") 
+summary(sqrtIns)
+```
+
+The above code transforms the 'actor_1_age' variable in the 'InsMod' data frame using the square root method and then compare the metrics.
+
+```{r}
+sqrtIns |>
+  plot()
+```
+
+These are the plots of original data and transformation with sqrt. We can see that the graph is not that much differing from the original data except the values because we have transformed it using square root method. This confirms that the skewness is the same after transformation preserving the general shape of data.
+
+#### Logarithmic (+1) Transformation
+
+```{r}
+Log1Ins <- transform(InsMod$actor_1_age, method = "log+1") 
+summary(Log1Ins)
+```
+
+Transforming the original data with logrithmic(+1) transformation and comparing the values.
+
+```{r}
+Log1Ins |>
+  plot()
+```
+
+The above graphs denotes the original data and transformed data using logrithmic(+1) transformation. We can see that the graphs have shifted slightly to the left than the original data. So the positive skewness has been reduced and we can see that the transformed plot resembles normal bell curve more.
+
+#### Inverse Transformation
+
+```{r}
+InvIns <- transform(InsMod$actor_1_age, method = "1/x") 
+summary(InvIns)
+```
+
+Transforming the original data with inverse transformation and comparing the values.
+
+```{r}
+InvIns |>
+  plot()
+```
+
+This transformation plot is similar to the last one. the idea is that we are transforming the data to make the data more normalised. Inverse transformation has reduced the skewness.
+
+#### Squared Transformation
+
+```{r}
+SqrdIns <- transform(InsMod$actor_1_age, method = "x^2") 
+summary(SqrdIns)
+```
+
+Transforming the original data with squared transformation and comparing the values.
+
+```{r}
+SqrdIns |>
+  plot()
+```
+
+So the squared transformation has skewed the data more to the negative side and made it a negative skew plot.
+
+#### Cubed Transformation
+
+```{r}
+CubeIns <- transform(InsMod$actor_1_age, method = "x^3") 
+summary(CubeIns)
+```
+
+Transforming the original data with cubed transformation and comparing the values.
+
+```{r}
+CubeIns |>
+  plot()
+```
+
+The cubed transformation is more like the squared transformation, so the original data is positive skewed and it is reversed, thus making it negative skew.
+
+### Box-Cox plot
+
+```{r}
+BoxCoxIns <- transform(InsMod$actor_1_age, method = "Box-Cox") 
+summary(BoxCoxIns)
+```
+
+Transforming the original data with Box-cox transformation and comparing the values.
+
+```{r}
+BoxCoxIns |>
+  plot()
+```
+
+Box-Cox transformation searches for the the best lambda value that maximizes the log-likelihood. So we can see that we have normally distributed data after transformation.
+
+## **Produce an HTML Transformation Summary**
+
+```{r}
+transformation_web_report(dataset)
+```

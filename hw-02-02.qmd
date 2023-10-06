@@ -1,0 +1,353 @@
+---
+title: "Imputing like a Data Scientist"
+author: "Aravind shrenivas Murali"
+format: html
+editor: visual
+toc: true
+---
+
+## Loading necessary packages
+
+```{r}
+# Sets the number of significant figures to two - e.g., 0.01
+options(digits = 2)
+
+# Required package for quick package downloading and loading 
+if (!require(pacman))
+  install.packages("pacman")
+
+pacman::p_load(colorblindr, # Colorblind friendly pallettes
+               cluster, # K cluster analyses
+               dlookr, # Exploratory data analysis
+               formattable, # HTML tables from R outputs
+               ggfortify, # Plotting tools for stats
+               ggpubr, # Publishable ggplots
+               here, # Standardizes paths to data
+               kableExtra, # Alternative to formattable
+               knitr, # Needed to write HTML reports
+               missRanger, # To generate NAs
+               plotly, # Visualization package
+               rattle, # Decision tree visualization
+               rpart, # rpart algorithm
+               tidyverse, # Powerful data wrangling package suite
+               visdat,
+               ggplot2
+               ) # Another EDA visualization package
+
+# Set global ggplot() theme
+# Theme pub_clean() from the ggpubr package with base text size = 16
+theme_set(theme_pubclean(base_size = 16)) 
+# All axes titles to their respective far right sides
+theme_update(axis.title = element_text(hjust = 1))
+# Remove axes ticks
+theme_update(axis.ticks = element_blank()) 
+# Remove legend key
+theme_update(legend.key = element_blank())
+```
+
+```{r}
+remotes::install_github("wilkelab/cowplot")
+if (!require(colorspace))  
+  install.packages("colorspace", repos = "http://R-Forge.R-project.org")
+
+remotes::install_github("clauswilke/colorblindr")
+
+if (!require(ggplot2))  
+  install.packages("ggplot2")
+
+if (!require(dplyr))  
+  install.packages("dplyr")
+
+library(ggplot2)
+library(dplyr)
+```
+
+## **Load and Examine a Data Set**
+
+```{r}
+dataset  <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-02-14/age_gaps.csv') |> 
+  mutate(actor_age = ifelse(actor_2_age >= 0 & actor_2_age <= 30, "Young",
+                            ifelse(actor_2_age > 30 & actor_2_age <= 50, "Old", "Very old")),
+         actor_age = fct_rev(actor_age))
+```
+
+```{r}
+dataset |>
+  head() |>
+  formattable()
+```
+
+I have imported the data, made some sub groups depending on the actors age and visualized the first few rows of dataset.
+
+## **Diagnose your Data**
+
+```{r}
+dataset |>
+  diagnose() |>
+  formattable()
+```
+
+Running `diagnose()` gives us the information of types, variables, missing count, unique count, unique rate of data, what percent of data is missing of the data set.\]
+
+## **Diagnose Outliers**
+
+```{r}
+# Table showing outliers
+dataset |>
+  diagnose_outlier() |>
+  filter(outliers_ratio > 0) |>  
+  mutate(rate = outliers_mean / with_mean) |>
+  arrange(desc(rate)) |> 
+  select(-outliers_cnt) |>
+  formattable()
+```
+
+The above is a formatted table showing information about outliers in the dataset, with rows sorted based on the calculated rate of outliers affecting the mean.
+
+```{r}
+# Boxplots and histograms of data with and without outliers
+dataset |>
+  select(find_outliers(dataset)) |>
+           plot_outlier()
+```
+
+We can see from the above graphs that outliers affect the histograms shape by producing the high unusual peaks. We can see the histogram without outliers are more uniform and consistent. As for as for box plots, we can see that throughout the graphs, the common thing is that the asymmetry of the data. Also the outliers are on one side of the box plot which indicates skewness of data.
+
+## **Basic Exploration of Missing Values (NAs)**
+
+```{r}
+# Randomly generate NAs for 30
+na.dataset <- dataset |>
+  generateNA(p = 0.3)
+
+# First six rows
+na.dataset |>
+head() |>
+  formattable()
+```
+
+In the above dataset we have inserted NA at random places and created a new dataser with missing values.
+
+```{r}
+# Create the NA table
+na.dataset |>
+  plot_na_pareto(only_na = TRUE, plot = FALSE) |>
+  formattable() # Publishable table
+```
+
+The table provides a summary of the categorical variables in your dataset, the occurences , its ratio relative to observed frequency and cumulative distribution of categories.
+
+```{r}
+# Plot the insersect of the columns with missing values
+# This plot visualizes the table above
+na.dataset |>
+  plot_na_pareto(only_na = TRUE)
+```
+
+The above graph shows us that our data set is bad because it is filled with missing values. It also has plotted a line where it denotes the frequency of missing values along with its variable names.
+
+## **Advanced Exploration of Missing Values (NAs)**
+
+```{r}
+# Plot the intersect of the 5 columns with the most missing values
+# This means that some combinations of columns have missing values in the same row
+na.dataset |>
+  select(age_difference, actor_1_age, actor_2_age) |>
+  plot_na_intersect(only_na = TRUE)
+```
+
+The orange boxes represent the specific columns under consideration. On the top, the green bar plots along the x-axis depict the count of missing values in each of these columns. Simultaneously, the green bars on the right side, along the y-axis, illustrate the number of missing values collectively across the columns highlighted by the orange blocks.
+
+### **Determining if NA Observations are the Same**
+
+```{r}
+# Interactive plotly() plot of all NA values to examine every row
+na.dataset |>
+ select(age_difference, actor_1_age, actor_2_age) |>
+ vis_miss() |>
+ ggplotly()
+```
+
+The above graph shows us the rows with missing values. We can hover over the graph and the information about the variable, if there is a missing value can be seen
+
+## **Impute Outliers and NAs**
+
+### **Classifying Outliers**
+
+```{r}
+# Box plot
+dataset |> # Set the simulated normal data as a data frame
+  ggplot(aes(x = actor_1_age, y = actor_age, fill = actor_age)) + # Create a ggplot
+  geom_boxplot(width = 0.5, outlier.size = 2, outlier.alpha = 0.5) +
+  xlab("actor_1_age") +  # Relabel the x axis label
+  ylab("Actor age classification") + # Remove the y axis label
+  scale_fill_OkabeIto() + # Change the color scheme for the fill criteria
+  theme(legend.position = "none")  # Remove the legend 
+```
+
+The above box plot shows the classification of actors depending on the age. We can see that the box plots are asymmetrical and outliers lie on the right which denotes the data is positively skewed. The old category subgroup has a very well normalised data compared to the rest subgroups.
+
+### **Mean Imputation**
+
+```{r}
+# Raw summary, output suppressed
+mean_out_imp_actor_1_age <- dataset |>
+  select(actor_1_age) |>
+  filter(actor_1_age < 100) |>
+  imputate_outlier(actor_1_age, method = "mean")
+
+# Output showing the summary statistics of our imputation
+mean_out_imp_actor_1_age |>
+  summary()
+```
+
+The mean of the observed values for each variable is computed and the outliers for that variable are imputed by this mean.
+
+```{r}
+# Visualization of the mean imputation
+mean_out_imp_actor_1_age |>
+  plot()
+```
+
+The original data and imputed data is plotted here. So overall, it is observed that the imputation with mean values tends to center the distribution, reduce variability, and lessen the rightward skewness observed in the original dataset.
+
+### **Median Imputation**
+
+```{r}
+# Raw summary, output suppressed
+med_out_imp_actor_1_age <- dataset |>
+  select(actor_1_age) |>
+  filter(actor_1_age < 100) |>
+  imputate_outlier(actor_1_age, method = "median")
+
+# Output showing the summary statistics of our imputation
+med_out_imp_actor_1_age |>
+  summary()
+```
+
+The median of the observed values for each variable is computed and the outliers for that variable are imputed by this median.
+
+```{r}
+med_out_imp_actor_1_age |>
+  plot()
+```
+
+The median imputation of the data led to a more centered and less skewed distribution.
+
+### **Mode Imputation**
+
+```{r}
+# Raw summary, output suppressed
+mode_out_imp_actor_1_age <- dataset |>
+  select(actor_1_age) |>
+  filter(actor_1_age < 100) |>
+  imputate_outlier(actor_1_age, method = "mode")
+
+# Output showing the summary statistics of our imputation
+mode_out_imp_actor_1_age |>
+  summary()
+```
+
+The mode of the observed values for each variable is computed and the outliers for that variable are imputed by this mode
+
+```{r}
+mode_out_imp_actor_1_age |>
+  plot()
+```
+
+The percentiles (p00 to p100) remain relatively stable, denoting that imputing outliers with the mode maintains the overall distribution shape, which can be observed from the plot.
+
+### **Capping Imputation (aka Winsorizing)**
+
+```{r}
+# Raw summary, output suppressed
+cap_out_imp_actor_1_age <- dataset |>
+  select(actor_1_age) |>
+  filter(actor_1_age < 100) |>
+  imputate_outlier(actor_1_age, method = "capping")
+
+# Output showing the summary statistics of our imputation
+cap_out_imp_actor_1_age |>
+  summary()
+```
+
+The Percentile Capping is a method of Imputing the outlier values by replacing those observations outside the lower limit with the value of 5th percentile and those that lie above the upper limit, with the value of 95th percentile of the same dataset.
+
+```{r}
+# Visualization of the capping imputation
+cap_out_imp_actor_1_age |>
+  plot()
+```
+
+The imputation process did not drastically alter the mean, but it effectively reduced the skewness and kurtosis, indicating a more symmetrical plot.
+
+## **Imputing NAs**
+
+### **K-Nearest Neighbor (KNN) Imputation**
+
+```{r}
+# KNN plot of our dataset without categories
+autoplot(clara(dataset[-5], 3)) +
+  scale_color_OkabeIto()
+```
+
+This is the KNN plot of our original data. KNN, a machine learning algorithm, categorizes data by measuring similarity, effectively grouping it into clusters. The algorithm predicts values for new data points by assessing their resemblance to training data.
+
+```{r}
+sub_dataset1 <- na.dataset[, c("actor_1_age")]
+sub_dataset2 <- dataset[, c("actor_age","actor_2_age")]
+new_dataset <- cbind(sub_dataset2, sub_dataset1)
+new_dataset
+```
+
+I have created a new dataset where i am going to predict the actor 1 age, so i have taken other columns from original data and i have merged them.
+
+```{r}
+# Raw summary, output suppressed
+knn_na_imp_actor_1_age <- new_dataset |>
+  imputate_na(actor_1_age, method = "knn")
+
+# Plot showing the results of our imputation
+knn_na_imp_actor_1_age |>
+  plot()
+```
+
+The graph above aligns with the original data in the start and in the end but drastically varies in the middle, which signifies that there are a lot of missing data.
+
+### **Recursive Partitioning and Regression Trees (rpart)**
+
+```{r}
+# Raw summary, output suppressed
+rpart_na_imp_actor_1_age <- new_dataset |>
+  imputate_na(actor_1_age, method = "rpart")
+
+# Plot showing the results of our imputation
+rpart_na_imp_actor_1_age |>
+  plot()
+```
+
+rpart is a machine learning algorithm designed for building decision trees in classification or regression tasks. It follows a two-stage process, resembling binary trees. The graph is shows so much variation to the original data.
+
+### **Multivariate Imputation by Chained Equations (MICE)**
+
+```{r}
+# Raw summary, output suppressed
+mice_na_imp_actor_1_age <- new_dataset |>
+  imputate_na(actor_1_age, method = "mice", seed = 123)
+```
+
+MICE is an algorithm that fills missing values multiple times, hence dealing with uncertainty better than other methods. This approach creates multiple copies of the data that can then be analyzed and then pooled into a single dataset.
+
+```{r}
+# Plot showing the results of our imputation
+mice_na_imp_actor_1_age |>
+  plot()
+```
+
+The MICE imputation plot matches the original data more than the other two techniques discussed above. Ultimately, the choice of choosing the model comes by trial and error method.
+
+## **Produce an HTML Transformation Summary**
+
+```{r}
+transformation_web_report(dataset)
+```
